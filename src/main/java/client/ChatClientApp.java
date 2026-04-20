@@ -12,19 +12,23 @@ import javafx.stage.Stage;
 public class ChatClientApp extends Application {
     private final NetworkClient network = new NetworkClient();
 
-    private String username;
+    private String username;          // vendoset vetem pas LOGIN success
+    private String pendingUsername;   // ruhet para login
     private String currentRoom;
+
+    private RequestType lastRequestType;
 
     private TextArea chatArea;
     private TextField inputField;
     private ListView<String> roomListView;
     private Label statusLabel;
+    private Label currentRoomLabel;
 
     @Override
     public void start(Stage stage) {
         stage.setTitle("Distributed Chat Client");
 
-        // Top - Login
+        // Top
         TextField hostField = new TextField("localhost");
         hostField.setPrefWidth(120);
 
@@ -44,7 +48,7 @@ public class ChatClientApp extends Application {
         );
         top.setPadding(new Insets(10));
 
-        // Left - Rooms
+        // Left
         roomListView = new ListView<>();
         roomListView.setPrefWidth(180);
 
@@ -54,18 +58,17 @@ public class ChatClientApp extends Application {
         Button createRoomBtn = new Button("Create");
         Button joinRoomBtn = new Button("Join");
         Button leaveRoomBtn = new Button("Leave");
-        Button refreshRoomsBtn = new Button("Refresh");
 
         VBox left = new VBox(8,
                 new Label("Rooms"),
                 roomListView,
                 roomField,
                 new HBox(6, createRoomBtn, joinRoomBtn),
-                new HBox(6, leaveRoomBtn, refreshRoomsBtn)
+                leaveRoomBtn
         );
         left.setPadding(new Insets(10));
 
-        // Center - Chat
+        // Center
         chatArea = new TextArea();
         chatArea.setEditable(false);
 
@@ -77,8 +80,10 @@ public class ChatClientApp extends Application {
         HBox.setHgrow(inputField, Priority.ALWAYS);
 
         statusLabel = new Label("Not connected.");
+        currentRoomLabel = new Label("Room aktiv: -");
+        currentRoomLabel.setStyle("-fx-font-size: 14px; -fx-font-weight: bold; -fx-text-fill: #0a84ff;");
 
-        VBox center = new VBox(8, chatArea, sendBox, statusLabel);
+        VBox center = new VBox(8, currentRoomLabel, chatArea, sendBox, statusLabel);
         center.setPadding(new Insets(10));
         VBox.setVgrow(chatArea, Priority.ALWAYS);
 
@@ -87,54 +92,68 @@ public class ChatClientApp extends Application {
         root.setLeft(left);
         root.setCenter(center);
 
-        Scene scene = new Scene(root, 900, 500);
-        stage.setScene(scene);
+        stage.setScene(new Scene(root, 900, 500));
         stage.show();
 
-        // Network callbacks
+        // callbacks
         network.setOnResponse(resp -> Platform.runLater(() -> {
-            appendSystem("RESP: " + (resp.isSuccess() ? "OK" : "ERR") + " - " + resp.getMessage());
+            if (!resp.isSuccess()) {
+                appendSystem("Gabim: " + resp.getMessage());
+                return;
+            }
+
+            switch (lastRequestType) {
+                case LOGIN -> {
+                    username = pendingUsername;
+                    statusLabel.setText("I lidhur si: " + username);
+                    appendSystem("U lidhe si " + username + ".");
+                    refreshRoomsAuto();
+                }
+                case CREATE_ROOM, JOIN_ROOM, LEAVE_ROOM -> refreshRoomsAuto();
+                default -> { }
+            }
         }));
 
         network.setOnEvent(event -> Platform.runLater(() -> {
             switch (event.getType()) {
                 case SYSTEM_MESSAGE -> appendSystem(event.getText());
                 case CHAT_MESSAGE -> appendChat(event.getMessage().format());
-                case ROOM_LIST -> {
-                    roomListView.getItems().setAll(event.getRooms());
-                    appendSystem("Rooms updated.");
-                }
+                case ROOM_LIST -> roomListView.getItems().setAll(event.getRooms());
             }
         }));
 
-        network.setOnError(err -> Platform.runLater(() -> appendSystem(err)));
+        network.setOnError(err -> Platform.runLater(() ->
+                appendSystem("Lidhja u nderpre: " + err)));
 
-        // Actions
+        // actions
         connectBtn.setOnAction(e -> {
+            if (username != null) {
+                appendSystem("Tashme je i lidhur.");
+                return;
+            }
+
+            String u = usernameField.getText().trim();
+            if (u.isEmpty()) {
+                appendSystem("Shkruaj nje username.");
+                return;
+            }
+
             try {
-                if (username != null) {
-                    appendSystem("Already connected.");
-                    return;
-                }
-                String host = hostField.getText().trim();
                 int port = Integer.parseInt(portField.getText().trim());
-                String u = usernameField.getText().trim();
+                network.connect(hostField.getText().trim(), port);
 
-                network.connect(host, port);
-                network.send(new Request(RequestType.LOGIN, u, null, null));
-
-                username = u;
-                statusLabel.setText("Connected as: " + username);
-                appendSystem("Connected.");
+                pendingUsername = u;
+                sendReq(RequestType.LOGIN, null, null); // LOGIN vetem ketu
+            } catch (NumberFormatException ex) {
+                appendSystem("Port i pavlefshem.");
             } catch (Exception ex) {
-                appendSystem("Connection error: " + ex.getMessage());
+                appendSystem("Gabim lidhje: " + ex.getMessage());
             }
         });
 
         createRoomBtn.setOnAction(e -> {
             String room = roomField.getText().trim();
-            if (room.isEmpty()) return;
-            sendReq(RequestType.CREATE_ROOM, room, null);
+            if (!room.isEmpty()) sendReq(RequestType.CREATE_ROOM, room, null);
         });
 
         joinRoomBtn.setOnAction(e -> {
@@ -143,20 +162,26 @@ public class ChatClientApp extends Application {
             if (room == null || room.isEmpty()) return;
 
             sendReq(RequestType.JOIN_ROOM, room, null);
+
+            // UI update lokale (server zakonisht e pranon nese room ekziston)
             currentRoom = room;
-            statusLabel.setText("User: " + username + " | Room: " + currentRoom);
+            currentRoomLabel.setText("Room aktiv: " + currentRoom);
+            statusLabel.setText("Perdoruesi: " + username + " | Room: " + currentRoom);
         });
 
         leaveRoomBtn.setOnAction(e -> {
             sendReq(RequestType.LEAVE_ROOM, null, null);
             currentRoom = null;
-            statusLabel.setText("User: " + username + " | Room: -");
+            currentRoomLabel.setText("Room aktiv: -");
+            statusLabel.setText("Perdoruesi: " + username + " | Room: -");
         });
-
-        refreshRoomsBtn.setOnAction(e -> sendReq(RequestType.LIST_ROOMS, null, null));
 
         sendBtn.setOnAction(e -> sendMessage());
         inputField.setOnAction(e -> sendMessage());
+    }
+
+    private void refreshRoomsAuto() {
+        sendReq(RequestType.LIST_ROOMS, null, null);
     }
 
     private void sendMessage() {
@@ -167,14 +192,17 @@ public class ChatClientApp extends Application {
     }
 
     private void sendReq(RequestType type, String room, String content) {
-        if (username == null) {
-            appendSystem("Login first.");
+        if (type != RequestType.LOGIN && username == null) {
+            appendSystem("Hyr fillimisht.");
             return;
         }
+
         try {
-            network.send(new Request(type, username, room, content));
+            lastRequestType = type;
+            String userToSend = (type == RequestType.LOGIN) ? pendingUsername : username;
+            network.send(new Request(type, userToSend, room, content));
         } catch (Exception e) {
-            appendSystem("Send failed: " + e.getMessage());
+            appendSystem("Dergimi deshtoi: " + e.getMessage());
         }
     }
 
@@ -183,7 +211,7 @@ public class ChatClientApp extends Application {
     }
 
     private void appendSystem(String text) {
-        chatArea.appendText("[SYSTEM] " + text + "\n");
+        chatArea.appendText("[SISTEM] " + text + "\n");
     }
 
     @Override
@@ -192,7 +220,7 @@ public class ChatClientApp extends Application {
             if (username != null) {
                 network.send(new Request(RequestType.LOGOUT, username, null, null));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) { }
         network.close();
     }
 

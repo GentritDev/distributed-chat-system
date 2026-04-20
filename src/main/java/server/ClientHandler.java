@@ -34,9 +34,7 @@ public class ClientHandler implements Runnable {
             while (running) {
                 Object obj = in.readObject();
                 if (!(obj instanceof Request)) continue;
-
-                Request req = (Request) obj;
-                handle(req);
+                handle((Request) obj);
             }
         } catch (EOFException ignored) {
         } catch (Exception e) {
@@ -48,45 +46,43 @@ public class ClientHandler implements Runnable {
 
     private void handle(Request req) throws IOException, InterruptedException {
         switch (req.getType()) {
-            case LOGIN -> handleLogin(req);
-            case CREATE_ROOM -> handleCreateRoom(req);
-            case JOIN_ROOM -> handleJoinRoom(req);
-            case LEAVE_ROOM -> handleLeaveRoom();
-            case LIST_ROOMS -> handleListRooms();
+            case LOGIN        -> handleLogin(req);
+            case CREATE_ROOM  -> handleCreateRoom(req);
+            case JOIN_ROOM    -> handleJoinRoom(req);
+            case LEAVE_ROOM   -> handleLeaveRoom();
+            case LIST_ROOMS   -> handleListRooms();
             case SEND_MESSAGE -> handleSendMessage(req);
-            case LOGOUT -> {
-                sendResponse(true, "Logout successful.");
+            case LOGOUT       -> {
+                sendResponse(true, "Logout i suksesshem.");
                 running = false;
+                // cleanup() thirret automatikisht nga finally - nuk duhet te thirret ketu
             }
         }
     }
 
     private void handleLogin(Request req) throws IOException {
-        String username = req.getUsername();
-        if (username == null || username.trim().isEmpty()) {
-            sendResponse(false, "Username invalid.");
+        String u = req.getUsername();
+        if (u == null || u.trim().isEmpty()) {
+            sendResponse(false, "Username i pavlefshem.");
             return;
         }
-
-        boolean ok = server.registerUsername(username, session);
-        if (!ok) {
-            sendResponse(false, "Username already exists.");
+        if (!server.registerUsername(u, session)) {
+            sendResponse(false, "Username ekziston tashme.");
             return;
         }
-
-        session.setUsername(username);
-        sendResponse(true, "Login successful.");
+        session.setUsername(u);
+        sendResponse(true, "Login i suksesshem.");
     }
 
     private void handleCreateRoom(Request req) throws IOException {
         if (!isLoggedIn()) return;
         String roomName = req.getRoomName();
         if (roomName == null || roomName.trim().isEmpty()) {
-            sendResponse(false, "Room name invalid.");
+            sendResponse(false, "Emri i room-it i pavlefshem.");
             return;
         }
         server.createRoomIfAbsent(roomName);
-        sendResponse(true, "Room ready: " + roomName);
+        sendResponse(true, "Room gati: " + roomName);
     }
 
     private void handleJoinRoom(Request req) throws IOException {
@@ -94,7 +90,7 @@ public class ClientHandler implements Runnable {
         String roomName = req.getRoomName();
         ChatRoom room = server.getRoom(roomName);
         if (room == null) {
-            sendResponse(false, "Room does not exist.");
+            sendResponse(false, "Room nuk ekziston.");
             return;
         }
 
@@ -103,8 +99,8 @@ public class ClientHandler implements Runnable {
         room.addMember(session);
         session.setCurrentRoom(roomName);
 
-        sendResponse(true, "Joined room: " + roomName);
-        room.broadcast(Event.system(session.getUsername() + " joined room."));
+        sendResponse(true, "U bashkove ne room: " + roomName);
+        room.broadcast(Event.system(session.getUsername() + " u bashkua."));
     }
 
     private void handleLeaveRoom() throws IOException {
@@ -119,68 +115,63 @@ public class ClientHandler implements Runnable {
         ChatRoom room = server.getRoom(oldRoom);
         if (room != null) {
             room.removeMember(session);
-            room.broadcast(Event.system(session.getUsername() + " left room."));
+            room.broadcast(common.Event.system(session.getUsername() + " left room."));
         }
+
         session.setCurrentRoom(null);
-        server.removeRoomIfEmpty(oldRoom);
+        server.removeRoomIfEmpty(oldRoom); // vetëm room-i i vjetër
 
         sendResponse(true, "Left room: " + oldRoom);
     }
-
     private void handleListRooms() throws IOException {
         if (!isLoggedIn()) return;
         List<String> rooms = server.listRooms();
         session.sendEvent(Event.roomList(rooms));
-        sendResponse(true, "Rooms listed.");
+        sendResponse(true, "Rooms u listuan.");
     }
 
     private void handleSendMessage(Request req) throws IOException, InterruptedException {
         if (!isLoggedIn()) return;
-
         String roomName = session.getCurrentRoom();
         if (roomName == null) {
-            sendResponse(false, "Join a room first.");
+            sendResponse(false, "Bashkohu ne nje room se pari.");
             return;
         }
-
         String content = req.getContent();
         if (content == null || content.trim().isEmpty()) {
-            sendResponse(false, "Message is empty.");
+            sendResponse(false, "Mesazhi eshte bosh.");
             return;
         }
-
         ChatRoom room = server.getRoom(roomName);
         if (room == null) {
-            sendResponse(false, "Room not found.");
+            sendResponse(false, "Room nuk u gjet.");
             return;
         }
-
         Message msg = new Message(session.getUsername(), roomName, content, LocalDateTime.now());
         room.enqueue(msg);
-        sendResponse(true, "Message sent.");
+        sendResponse(true, "Mesazhi u dergua.");
     }
 
     private boolean isLoggedIn() throws IOException {
         if (session.getUsername() == null) {
-            sendResponse(false, "Login first.");
+            sendResponse(false, "Hyr fillimisht.");
             return false;
         }
         return true;
     }
 
+    // Thirret vetem nga handleJoinRoom dhe cleanup() — jo nga LOGOUT
     private void leaveCurrentRoomIfAny() {
         String oldRoom = session.getCurrentRoom();
         if (oldRoom == null) return;
-
         ChatRoom old = server.getRoom(oldRoom);
         if (old != null) {
             old.removeMember(session);
-            old.broadcast(Event.system(session.getUsername() + " switched room."));
+            old.broadcast(Event.system(session.getUsername() + " ndërroi room."));
         }
         session.setCurrentRoom(null);
         server.removeRoomIfEmpty(oldRoom);
     }
-
 
     private void sendResponse(boolean success, String message) throws IOException {
         session.sendResponse(new Response(success, message));

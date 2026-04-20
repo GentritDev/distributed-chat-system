@@ -26,6 +26,8 @@ public class Message implements Serializable {
 
     public String format() {
         return "[" + timestamp.format(DateTimeFormatter.ofPattern("HH:mm:ss")) + "] "
+                + "[" + roomName + "] "
                 + sender + ": " + content;
     }
+
 }

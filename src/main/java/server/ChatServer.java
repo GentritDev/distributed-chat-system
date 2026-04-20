@@ -88,15 +88,15 @@ public class ChatServer {
     }
 
     public void removeRoomIfEmpty(String roomName) {
-        roomsLock.lock();
-        try {
-            ChatRoom room = roomsByName.get(roomName);
-            if (room != null && room.memberCount() == 0) {
-                room.shutdown();
-                roomsByName.remove(roomName);
-            }
-        } finally {
-            roomsLock.unlock();
-        }
+//        roomsLock.lock();
+//        try {
+//            ChatRoom room = roomsByName.get(roomName);
+//            if (room != null && room.memberCount() == 0) {
+//                room.shutdown();
+//                roomsByName.remove(roomName); // vetëm ky room
+//            }
+//        } finally {
+//            roomsLock.unlock();
+//        }
     }
 }
